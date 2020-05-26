@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"bytes"
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	"github.com/opentracing/opentracing-go/log"
-	"golang.org/x/net/context"
-	p "gopkg.in/rethinkdb/rethinkdb-go.v6/ql2"
 	"sync"
+
+	"go.opentelemetry.io/otel/api/trace"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc/codes"
+	p "gopkg.in/rethinkdb/rethinkdb-go.v6/ql2"
 )
 
 const (
@@ -76,7 +76,7 @@ type tokenAndPromise struct {
 	ctx     context.Context
 	query   *Query
 	promise chan responseAndCursor
-	span    opentracing.Span
+	span    trace.Span
 }
 
 // NewConnection creates a new connection to the database server
@@ -181,28 +181,28 @@ func (c *Connection) Query(ctx context.Context, q Query) (*Response, *Cursor, er
 		}
 	}
 
-	var fetchingSpan opentracing.Span
+	var fetchingSpan trace.Span
 	if c.opts.UseOpentracing {
-		parentSpan := opentracing.SpanFromContext(ctx)
+		parentSpan := trace.SpanFromContext(ctx)
 		if parentSpan != nil {
 			if q.Type == p.Query_START {
-				querySpan := c.startTracingSpan(parentSpan, &q) // will be Finished when cursor connClosed
+
+				querySpan := c.startTracingSpan(ctx, parentSpan, &q) // will be Finished when cursor connClosed
 				parentSpan = querySpan
-				ctx = opentracing.ContextWithSpan(ctx, querySpan)
+				ctx = trace.ContextWithSpan(ctx, querySpan)
 			}
 
-			fetchingSpan = c.startTracingSpan(parentSpan, &q) // will be Finished when response arrived
+			fetchingSpan = c.startTracingSpan(ctx, parentSpan, &q) // will be Finished when response arrived
 		}
 	}
 
 	err := c.sendQuery(q)
 	if err != nil {
 		if fetchingSpan != nil {
-			ext.Error.Set(fetchingSpan, true)
-			fetchingSpan.LogFields(log.Error(err))
-			fetchingSpan.Finish()
+			fetchingSpan.SetStatus(codes.Internal, err.Error())
+			fetchingSpan.End()
 			if q.Type == p.Query_START {
-				opentracing.SpanFromContext(ctx).Finish()
+				trace.SpanFromContext(ctx).End()
 			}
 		}
 		return nil, nil, err
@@ -237,17 +237,16 @@ func (c *Connection) stopQuery(q *Query) (*Response, *Cursor, error) {
 	return nil, nil, ErrQueryTimeout
 }
 
-func (c *Connection) startTracingSpan(parentSpan opentracing.Span, q *Query) opentracing.Span {
-	span := parentSpan.Tracer().StartSpan(
+func (c *Connection) startTracingSpan(ctx context.Context, parentSpan trace.Span, q *Query) trace.Span {
+	ctx, span := parentSpan.Tracer().Start(
+		ctx,
 		"Query_"+q.Type.String(),
-		opentracing.ChildOf(parentSpan.Context()),
-		ext.SpanKindRPCClient)
-
-	ext.PeerAddress.Set(span, c.address)
-	ext.Component.Set(span, "rethinkdb-go")
-
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
+	span.SetAttribute("PeerAddress", c.address)
+	span.SetAttribute("Component", "rethinkdb-go")
 	if q.Type == p.Query_START {
-		span.LogFields(log.String("query", q.Term.String()))
+		span.SetAttribute("Query", q.Term.String())
 	}
 
 	return span
@@ -430,14 +429,13 @@ func (c *Connection) readResponse() (*Response, error) {
 }
 
 // Called to fill response for the query
-func (c *Connection) processResponse(ctx context.Context, q Query, response *Response, span opentracing.Span) (r *Response, cur *Cursor, err error) {
+func (c *Connection) processResponse(ctx context.Context, q Query, response *Response, span trace.Span) (r *Response, cur *Cursor, err error) {
 	if span != nil {
 		defer func() {
 			if err != nil {
-				ext.Error.Set(span, true)
-				span.LogFields(log.Error(err))
+				span.SetStatus(codes.Internal, err.Error())
 			}
-			span.Finish()
+			span.End()
 		}()
 	}
 

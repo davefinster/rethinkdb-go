@@ -417,11 +417,11 @@ func (s *ConnectionSuite) TestConnection_processResponse_CompileErrOk(c *test.C)
 	c.Assert(err, test.FitsTypeOf, RQLCompileError{})
 }
 
+type mockSpan struct{}
+
 func (s *ConnectionSuite) TestConnection_processResponse_RuntimeErrOk(c *test.C) {
-	tracer := mocktracer.New()
-	rootSpan := tracer.StartSpan("root")
-	ctx := opentracing.ContextWithSpan(context.Background(), rootSpan)
-	qSpan := rootSpan.Tracer().StartSpan("q", opentracing.ChildOf(rootSpan.Context()))
+
+	ctx := context.Background()
 
 	token := int64(3)
 	term := Table("test")
@@ -430,13 +430,11 @@ func (s *ConnectionSuite) TestConnection_processResponse_RuntimeErrOk(c *test.C)
 
 	connection := newConnection(nil, "addr", &ConnectOpts{})
 
-	resp, cursor, err := connection.processResponse(ctx, q, response, qSpan)
+	resp, cursor, err := connection.processResponse(ctx, q, response, nil)
 
 	c.Assert(resp, test.Equals, response)
 	c.Assert(cursor, test.IsNil)
 	c.Assert(err, test.FitsTypeOf, RQLRuntimeError{})
-	c.Assert(tracer.FinishedSpans(), test.HasLen, 1)
-	c.Assert(tracer.FinishedSpans()[0].Tags()["error"], test.Equals, true)
 }
 
 func (s *ConnectionSuite) TestConnection_processResponse_FirstPartialOk(c *test.C) {
@@ -490,10 +488,7 @@ func (s *ConnectionSuite) TestConnection_processResponse_PartialOk(c *test.C) {
 }
 
 func (s *ConnectionSuite) TestConnection_processResponse_SequenceOk(c *test.C) {
-	tracer := mocktracer.New()
-	rootSpan := tracer.StartSpan("root")
-	ctx := opentracing.ContextWithSpan(context.Background(), rootSpan)
-	qSpan := rootSpan.Tracer().StartSpan("q", opentracing.ChildOf(rootSpan.Context()))
+	ctx := context.Background()
 
 	token := int64(3)
 	q := Query{Token: token}
@@ -503,7 +498,7 @@ func (s *ConnectionSuite) TestConnection_processResponse_SequenceOk(c *test.C) {
 
 	connection := newConnection(nil, "addr", &ConnectOpts{})
 
-	resp, cursor, err := connection.processResponse(ctx, q, response, qSpan)
+	resp, cursor, err := connection.processResponse(ctx, q, response, nil)
 
 	c.Assert(resp, test.Equals, response)
 	c.Assert(cursor, test.NotNil)
@@ -515,8 +510,6 @@ func (s *ConnectionSuite) TestConnection_processResponse_SequenceOk(c *test.C) {
 	c.Assert(cursor.conn, test.Equals, connection)
 	c.Assert(err, test.IsNil)
 	c.Assert(connection.cursors, test.HasLen, 0)
-	c.Assert(tracer.FinishedSpans(), test.HasLen, 1)
-	c.Assert(tracer.FinishedSpans()[0].Tags(), test.HasLen, 0)
 }
 
 func (s *ConnectionSuite) TestConnection_processResponse_WaitOk(c *test.C) {
