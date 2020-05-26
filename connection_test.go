@@ -3,8 +3,6 @@ package rethinkdb
 import (
 	"encoding/binary"
 	"encoding/json"
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/mocktracer"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/net/context"
 	test "gopkg.in/check.v1"
@@ -210,9 +208,7 @@ func (s *ConnectionSuite) TestConnection_Query_TimeoutRead(c *test.C) {
 }
 
 func (s *ConnectionSuite) TestConnection_Query_SendFailTracing(c *test.C) {
-	tracer := mocktracer.New()
-	rootSpan := tracer.StartSpan("root")
-	ctx := opentracing.ContextWithSpan(context.Background(), rootSpan)
+	ctx := context.Background()
 	token := int64(1)
 	q := testQuery(DB("db").Table("table").Get("id"))
 	writeData := serializeQuery(token, q)
@@ -227,7 +223,6 @@ func (s *ConnectionSuite) TestConnection_Query_SendFailTracing(c *test.C) {
 	c.Assert(cursor, test.IsNil)
 	c.Assert(err, test.Equals, RQLConnectionError{rqlError(io.EOF.Error())})
 	conn.AssertExpectations(c)
-	c.Assert(tracer.FinishedSpans(), test.HasLen, 2)
 }
 
 func (s *ConnectionSuite) TestConnection_processResponses_SocketErr(c *test.C) {

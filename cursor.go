@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel/api/trace"
 	"golang.org/x/net/context"
 	"gopkg.in/rethinkdb/rethinkdb-go.v6/encoding"
 	p "gopkg.in/rethinkdb/rethinkdb-go.v6/ql2"
@@ -158,8 +158,8 @@ func (c *Cursor) Close() error {
 		}
 	}
 
-	if span := opentracing.SpanFromContext(c.ctx); span != nil {
-		span.Finish()
+	if span := trace.SpanFromContext(c.ctx); span != nil {
+		span.End()
 	}
 
 	c.closed = true
